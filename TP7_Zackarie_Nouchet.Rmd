@@ -1,0 +1,1083 @@
+---
+title: "TP 8 : Programmer avec R"
+author: "Zackarie Nouchet"
+output:
+  html_document:
+    toc: true
+    df_print: kable
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+# Noms de mois et de jours en français (sous Windows : "French")
+invisible(Sys.setlocale("LC_TIME", "fr_FR.UTF-8"))
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, fig.align = "center",
+                      fig.width = 7, fig.height = 4)
+theme_set(theme_minimal())
+```
+
+# Partie A : Conditions et boucles
+
+## A1. Prédire avant d'exécuter
+
+Prédictions écrites **avant** exécution, puis résultat réel.
+
+```{r a1-x}
+x <- c(5, NA, 12)
+if (length(x) > 2) "long" else "court"
+```
+
+*Prédiction* : `length(x)` vaut 3, donc `"long"`.
+
+```{r a1-ifelse}
+ifelse(x > 10, "grand", "petit")
+```
+
+*Prédiction* : `x > 10` vaut `FALSE NA TRUE`, donc `"petit" NA "grand"` : `ifelse()` est vectorisé et propage les `NA`.
+
+```{r a1-if-na, error = TRUE}
+if (x[2] > 10) "grand"
+```
+
+*Prédiction* : `x[2] > 10` vaut `NA`, et `if` exige un booléen : erreur « missing value where TRUE/FALSE needed ». Contrairement à `ifelse()`, `if` n'accepte ni `NA` ni vecteur de longueur > 1.
+
+```{r a1-for0}
+for (i in seq_len(0)) print("un tour")
+```
+
+*Prédiction* : `seq_len(0)` est vide, la boucle ne fait aucun tour, rien n'est affiché (c'est pourquoi on préfère `seq_len(n)` à `1:n`, qui donnerait `1 0` si `n = 0`).
+
+```{r a1-total}
+total <- 0
+for (v in x) total <- total + v
+total
+```
+
+*Prédiction* : `0 + 5 = 5`, puis `5 + NA = NA`, et `NA + 12 = NA` : le résultat est `NA`.
+
+```{r a1-while}
+i <- 0
+while (i < 10) i <- i + 3
+i
+```
+
+*Prédiction* : `i` prend les valeurs 0, 3, 6, 9 (encore < 10) puis 12 : la boucle s'arrête et `i` vaut 12.
+
+```{r a1-f}
+f <- function(a, b = a * 2) a + b
+f(3)
+f(3, 1)
+```
+
+*Prédiction* : `b` vaut par défaut `3 * 2 = 6` (évaluation paresseuse : la valeur par défaut est calculée à partir de `a`), donc `f(3) = 9` ; `f(3, 1) = 4`.
+
+```{r a1-g}
+g <- function() z <- 5
+g()
+exists("z")
+```
+
+*Prédiction* : `g()` renvoie `5` mais **de façon invisible** (la dernière expression est une affectation), donc rien ne s'affiche. `z` est local à la fonction, donc `exists("z")` vaut `FALSE`.
+
+```{r a1-sapply}
+sapply(1:3, function(k) k:1)
+```
+
+*Prédiction* : les résultats ont des longueurs différentes (1, 2 et 3), `sapply()` ne peut pas les simplifier en matrice et renvoie une **liste** : `1`, `2 1`, `3 2 1`.
+
+**Bilan.** Les écarts avec une intuition naïve viennent surtout de : (1) la propagation des `NA` (`total`, `if`) ; (2) l'invisibilité du résultat d'une affectation et la portée locale des variables d'une fonction ; (3) la simplification automatique de `sapply()`, qui change de type de sortie selon les longueurs, ce qui est dangereux en programmation (on préfère `vapply()` ou `map_*()` de purrr).
+
+## A2. La suite de Syracuse
+
+**a.** La fonction :
+
+```{r a2-fonction}
+syracuse <- function(n) {
+  if (!is.numeric(n) || length(n) != 1 || is.na(n) || n < 1 || n != floor(n)) {
+    stop("`n` doit être un entier positif (un seul nombre >= 1).", call. = FALSE)
+  }
+  suite <- n
+  while (n != 1) {
+    n <- if (n %% 2 == 0) n / 2 else 3 * n + 1
+    suite <- c(suite, n)
+  }
+  suite
+}
+
+# Tests
+stopifnot(
+  all.equal(syracuse(6), c(6, 3, 10, 5, 16, 8, 4, 2, 1)),            # cas courant
+  identical(syracuse(1), 1),                                          # cas limite
+  inherits(try(syracuse(0), silent = TRUE), "try-error"),             # erreurs
+  inherits(try(syracuse(2.5), silent = TRUE), "try-error"),
+  inherits(try(syracuse("a"), silent = TRUE), "try-error")
+)
+syracuse(6)
+```
+
+**b.** Durée de vol (nombre d'étapes, donc longueur de la suite moins 1) et altitude (maximum) pour 1 à 10 000 :
+
+```{r a2-tableau}
+vols <- tibble(n = 1:10000) |>
+  mutate(suite    = map(n, syracuse),
+         duree    = map_int(suite, \(s) length(s) - 1L),
+         altitude = map_dbl(suite, max)) |>
+  select(-suite)
+head(vols)
+```
+
+**c.**
+
+```{r a2-records}
+plus_long  <- slice_max(vols, duree, n = 1)
+plus_haut  <- slice_max(vols, altitude, n = 1)
+plus_long
+plus_haut
+```
+
+**Réponse.** L'entier ayant la plus longue durée de vol est **`r plus_long$n`** (`r plus_long$duree` étapes) ; celui qui atteint la plus haute altitude est **`r plus_haut$n`**, qui monte jusqu'à **`r format(plus_haut$altitude, big.mark = " ", scientific = FALSE)`**.
+
+**d.**
+
+```{r a2-graphique}
+ggplot(vols, aes(n, duree)) +
+  geom_point(size = 0.4, alpha = 0.25) +
+  labs(x = "n", y = "Durée de vol (étapes)",
+       title = "Durée de vol de la suite de Syracuse")
+```
+
+Les durées sont très dispersées et forment des « bandes » : des entiers voisins peuvent avoir des durées très différentes, mais la durée croît globalement (lentement, de façon à peu près logarithmique) avec $n$.
+
+## A3. Pré-allouer ou vectoriser
+
+**a.** Trois façons de calculer les moyennes cumulées :
+
+```{r a3-calcul}
+set.seed(808)
+x <- rnorm(50000)
+
+# 1. le vecteur grandit à chaque tour
+cumul_grandit <- function(x) {
+  m <- c(); s <- 0
+  for (i in seq_along(x)) {
+    s <- s + x[i]
+    m <- c(m, s / i)
+  }
+  m
+}
+
+# 2. vecteur pré-alloué
+cumul_prealloue <- function(x) {
+  m <- numeric(length(x)); s <- 0
+  for (i in seq_along(x)) {
+    s <- s + x[i]
+    m[i] <- s / i
+  }
+  m
+}
+
+# 3. sans boucle
+cumul_vectorise <- function(x) cumsum(x) / seq_along(x)
+
+# Tests
+stopifnot(
+  all.equal(cumul_vectorise(c(2, 4, 6)), c(2, 3, 4)),                  # cas courant
+  length(cumul_vectorise(numeric(0))) == 0,                            # cas limite : vide
+  all.equal(cumul_prealloue(5), 5),                                    # un seul élément
+  all.equal(cumul_grandit(c(2, 4, 6)), cumul_prealloue(c(2, 4, 6)))
+)
+```
+
+**b.**
+
+```{r a3-temps}
+t1 <- system.time(m1 <- cumul_grandit(x))
+t2 <- system.time(m2 <- cumul_prealloue(x))
+t3 <- system.time(m3 <- cumul_vectorise(x))
+
+temps <- tibble(version = c("vecteur qui grandit", "pré-alloué", "cumsum()"),
+                secondes = c(t1[["elapsed"]], t2[["elapsed"]], t3[["elapsed"]]))
+temps
+
+stopifnot(isTRUE(all.equal(m1, m2)), isTRUE(all.equal(m1, m3)))
+```
+
+Les trois résultats sont identiques (`all.equal()`). La version `cumsum()` est la plus rapide (de plusieurs ordres de grandeur), suivie de la version pré-allouée ; faire grandir le vecteur oblige R à réallouer et recopier un vecteur de plus en plus grand à chaque tour.
+
+**c.** Recalcul de `mean(x[1:i])` à chaque tour, sur les 10 000 premières valeurs :
+
+```{r a3-mean-naif}
+x10k <- x[1:10000]
+t_naif <- system.time({
+  m_naif <- numeric(length(x10k))
+  for (i in seq_along(x10k)) m_naif[i] <- mean(x10k[1:i])
+})
+t_ref <- system.time(m_ref <- cumul_prealloue(x10k))
+c(naif = t_naif[["elapsed"]], somme_courante = t_ref[["elapsed"]])
+all.equal(m_naif, m_ref)
+```
+
+**Explication.** À chaque tour, `x[1:i]` crée une copie de $i$ éléments puis `mean()` les reparcourt : le travail total est proportionnel à $1 + 2 + \dots + n = n(n+1)/2$, soit un coût **quadratique** $O(n^2)$, alors que la somme courante ne fait qu'une opération par tour, soit $O(n)$. Doubler la taille multiplie donc le temps par ~4 pour la version naïve, par 2 pour la somme courante, et `cumsum()` fait le même travail en une seule passe en C.
+
+## A4. Le crible d'Ératosthène
+
+**a.**
+
+```{r a4-crible}
+crible <- function(n) {
+  if (!is.numeric(n) || length(n) != 1 || is.na(n) || n < 0 || n != floor(n)) {
+    stop("`n` doit être un entier positif.", call. = FALSE)
+  }
+  if (n < 2) return(integer(0))
+  premier <- rep(TRUE, n)
+  premier[1] <- FALSE
+  # p = 2, 3, ..., floor(sqrt(n)) (seq_len(...)[-1] retire p = 1 et reste vide si besoin)
+  for (p in seq_len(floor(sqrt(n)))[-1]) {
+    if (premier[p]) premier[seq(p^2, n, by = p)] <- FALSE
+  }
+  which(premier)
+}
+
+stopifnot(
+  identical(crible(30), c(2L, 3L, 5L, 7L, 11L, 13L, 17L, 19L, 23L, 29L)),  # cas courant
+  identical(crible(1), integer(0)),                                         # cas limites
+  identical(crible(2), 2L),
+  identical(crible(4), c(2L, 3L)),
+  inherits(try(crible(-5), silent = TRUE), "try-error")                     # erreur
+)
+```
+
+**b.**
+
+```{r a4-est-premier}
+est_premier <- function(k) {
+  if (!is.numeric(k) || length(k) != 1 || is.na(k) || k != floor(k)) {
+    stop("`k` doit être un entier (un seul nombre).", call. = FALSE)
+  }
+  if (k < 2) return(FALSE)
+  # aucun diviseur entre 2 et floor(sqrt(k))
+  all(k %% seq_len(floor(sqrt(k)))[-1] != 0)
+}
+
+stopifnot(
+  est_premier(97), !est_premier(91),                       # 91 = 7 x 13
+  !est_premier(1), !est_premier(0), est_premier(2), est_premier(3), !est_premier(4),
+  inherits(try(est_premier("a"), silent = TRUE), "try-error")
+)
+
+premiers_1 <- crible(1000)
+premiers_2 <- Filter(est_premier, 1:1000)
+stopifnot(identical(premiers_1, as.integer(premiers_2)))
+length(premiers_1)
+```
+
+Les deux méthodes donnent les mêmes `r length(premiers_1)` nombres premiers jusqu'à 1 000.
+
+**c.**
+
+```{r a4-comptage}
+n_premiers  <- length(crible(99999))
+p           <- crible(999)
+n_jumeaux   <- sum(diff(p) == 2)
+c(premiers_sous_100000 = n_premiers, couples_jumeaux_sous_1000 = n_jumeaux)
+```
+
+**Réponse.** Il y a **`r format(n_premiers, big.mark = " ")`** nombres premiers inférieurs à 100 000 et **`r n_jumeaux`** couples de nombres premiers jumeaux inférieurs à 1 000.
+
+## A5. Réécrire sans boucle
+
+```{r a5}
+set.seed(2025)
+temp <- round(rnorm(365, 15, 6), 1)
+
+# (a) nombre de jours au-dessus de la moyenne annuelle
+n_chauds <- 0
+for (t in temp) if (t > mean(temp)) n_chauds <- n_chauds + 1
+n_chauds_v <- sum(temp > mean(temp))
+
+# (b) écart avec la veille
+ecart <- numeric(length(temp))
+ecart[1] <- NA
+for (i in 2:length(temp)) ecart[i] <- temp[i] - temp[i - 1]
+ecart_v <- c(NA, diff(temp))
+
+# (c) jours de record : plus chaud que tous les jours précédents
+record <- logical(length(temp))
+record[1] <- TRUE
+for (i in 2:length(temp)) record[i] <- temp[i] > max(temp[1:(i - 1)])
+record_v <- temp > c(-Inf, head(cummax(temp), -1))
+
+stopifnot(
+  isTRUE(all.equal(n_chauds, n_chauds_v)),
+  isTRUE(all.equal(ecart, ecart_v)),
+  identical(record, record_v)
+)
+c(jours_chauds = n_chauds_v, jours_record = sum(record_v))
+```
+
+- (a) `sum(temp > mean(temp))` : la comparaison est vectorisée et la somme de booléens compte les `TRUE` (la boucle recalculait aussi `mean(temp)` à chaque tour).
+- (b) `c(NA, diff(temp))` : `diff()` calcule `temp[i] - temp[i-1]`, on ajoute le `NA` du premier jour.
+- (c) `temp > c(-Inf, head(cummax(temp), -1))` : `cummax()` donne le maximum courant, décalé d'un jour pour comparer chaque jour aux précédents ; `-Inf` fait du premier jour un record.
+
+# Partie B : Écrire des fonctions robustes
+
+## B1. Moyenne pondérée
+
+```{r b1}
+moyenne_ponderee <- function(x, poids, na.rm = FALSE) {
+  if (!is.numeric(x))     stop("`x` doit être numérique.", call. = FALSE)
+  if (!is.numeric(poids)) stop("`poids` doit être numérique.", call. = FALSE)
+  if (length(x) != length(poids)) {
+    stop(sprintf("`x` (%d valeurs) et `poids` (%d valeurs) n'ont pas la même longueur.",
+                 length(x), length(poids)), call. = FALSE)
+  }
+  if (any(poids < 0, na.rm = TRUE)) stop("Les poids ne doivent pas être négatifs.", call. = FALSE)
+
+  if (na.rm) {
+    garde <- !is.na(x) & !is.na(poids)
+    x <- x[garde]; poids <- poids[garde]
+  } else if (anyNA(x) || anyNA(poids)) {
+    return(NA_real_)
+  }
+  if (sum(poids) == 0) stop("La somme des poids est nulle.", call. = FALSE)
+  sum(x * poids) / sum(poids)
+}
+
+stopifnot(
+  all.equal(moyenne_ponderee(c(1, 2, 3), c(1, 1, 2)), 2.25),                 # cas courant
+  all.equal(moyenne_ponderee(c(10, 20), c(1, 1)), mean(c(10, 20))),          # poids égaux
+  is.na(moyenne_ponderee(c(1, NA, 3), c(1, 1, 1))),                          # NA sans na.rm
+  all.equal(moyenne_ponderee(c(1, NA, 3), c(1, 1, 1), na.rm = TRUE), 2),     # avec na.rm
+  all.equal(moyenne_ponderee(c(1, 2, 3), c(1, NA, 1), na.rm = TRUE), 2),     # poids manquant
+  all.equal(moyenne_ponderee(5, 3), 5),                                      # cas limite
+  inherits(try(moyenne_ponderee(c(1, 2), c(0, 0)), silent = TRUE), "try-error")
+)
+```
+
+Messages d'erreur de trois appels incorrects :
+
+```{r b1-erreurs}
+tryCatch(moyenne_ponderee("a", 1), error = conditionMessage)
+tryCatch(moyenne_ponderee(1:3, 1:2), error = conditionMessage)
+tryCatch(moyenne_ponderee(1:3, c(1, -1, 1)), error = conditionMessage)
+tryCatch(moyenne_ponderee(1:3, c(0, 0, 0)), error = conditionMessage)
+```
+
+## B2. Conversion de températures
+
+```{r b2}
+convertir_temp <- function(x, de = c("C", "F", "K"), vers = c("C", "F", "K")) {
+  de   <- match.arg(de)
+  vers <- match.arg(vers)
+  if (!is.numeric(x)) stop("`x` doit être numérique.", call. = FALSE)
+
+  # 1. vers les degrés Celsius
+  celsius <- switch(de, C = x, F = (x - 32) / 1.8, K = x - 273.15)
+
+  # 2. valeurs sous le zéro absolu (petite tolérance pour les erreurs d'arrondi)
+  impossible <- !is.na(celsius) & celsius < -273.15 - 1e-8
+  if (any(impossible)) {
+    warning(sprintf("%d valeur(s) inférieure(s) au zéro absolu remplacée(s) par NA.",
+                    sum(impossible)), call. = FALSE)
+    celsius[impossible] <- NA
+  }
+
+  # 3. des degrés Celsius vers la cible
+  switch(vers, C = celsius, F = 1.8 * celsius + 32, K = celsius + 273.15)
+}
+
+stopifnot(
+  all.equal(convertir_temp(100, "C", "F"), 212),
+  all.equal(convertir_temp(-40, "F", "C"), -40),
+  all.equal(convertir_temp(0, "K", "C"), -273.15),
+  all.equal(convertir_temp(convertir_temp(convertir_temp(25, "C", "K"), "K", "F"), "F", "C"), 25),
+  all.equal(convertir_temp(c(0, 100), "C", "K"), c(273.15, 373.15)),         # vecteur
+  !anyNA(convertir_temp(-459.67, "F", "C")),                                  # zéro absolu exact en F
+  inherits(try(convertir_temp(1, "X", "C"), silent = TRUE), "try-error")     # match.arg
+)
+
+# avertissement : 2 valeurs impossibles
+res <- withCallingHandlers(
+  convertir_temp(c(-300, 20, -500, NA), "C", "K"),
+  warning = function(w) { message("Avertissement : ", conditionMessage(w)); invokeRestart("muffleWarning") }
+)
+res
+stopifnot(identical(is.na(res), c(TRUE, FALSE, TRUE, TRUE)),
+          grepl("^2 ", tryCatch(convertir_temp(c(-300, 20, -500), "C", "K"),
+                                warning = conditionMessage)))
+```
+
+## B3. Tableau d'amortissement d'un prêt
+
+**a.**
+
+```{r b3-fonction}
+amortissement <- function(capital, taux_annuel, annees) {
+  if (!is.numeric(capital) || length(capital) != 1 || capital <= 0)
+    stop("`capital` doit être un nombre strictement positif.", call. = FALSE)
+  if (!is.numeric(taux_annuel) || length(taux_annuel) != 1 || taux_annuel < 0)
+    stop("`taux_annuel` doit être un nombre positif ou nul.", call. = FALSE)
+  if (!is.numeric(annees) || length(annees) != 1 || annees <= 0 ||
+      abs(annees * 12 - round(annees * 12)) > 1e-8)
+    stop("`annees` doit correspondre à un nombre entier de mois.", call. = FALSE)
+
+  n <- round(annees * 12)
+  t <- taux_annuel / 12
+  M <- if (t == 0) capital / n else capital * t / (1 - (1 + t)^(-n))
+
+  interets <- capital_rembourse <- restant_du <- numeric(n)
+  restant <- capital
+  for (m in seq_len(n)) {
+    interets[m]          <- t * restant
+    capital_rembourse[m] <- M - interets[m]
+    restant              <- restant - capital_rembourse[m]
+    restant_du[m]        <- restant
+  }
+  tibble(mois = seq_len(n), mensualite = M, interets, capital_rembourse, restant_du)
+}
+
+pret <- amortissement(200000, 0.035, 20)
+head(pret)
+
+stopifnot(
+  abs(last(pret$restant_du)) < 1e-6,                                 # soldé à la fin
+  all.equal(sum(pret$capital_rembourse), 200000),                    # capital remboursé
+  nrow(pret) == 240,
+  nrow(amortissement(1200, 0, 1)) == 12,                             # cas limite : taux nul
+  all.equal(amortissement(1200, 0, 1)$mensualite[1], 100),
+  abs(last(amortissement(1000, 0.05, 0.5)$restant_du)) < 1e-6,       # durée de 6 mois
+  inherits(try(amortissement(-1, 0.03, 10), silent = TRUE), "try-error")
+)
+```
+
+**b.**
+
+```{r b3-resultats}
+mensualite   <- pret$mensualite[1]
+cout_total   <- sum(pret$interets)
+mois_bascule <- min(which(pret$capital_rembourse > pret$interets))
+part_5_ans   <- sum(pret$interets[1:60]) / cout_total
+```
+
+- Mensualité : **`r round(mensualite, 2)` €**.
+- Coût total des intérêts : **`r format(round(cout_total, 2), big.mark = " ", nsmall = 2)` €**.
+- On rembourse plus de capital que d'intérêts à partir du **mois `r mois_bascule`** (dès la première année).
+- Part du coût total des intérêts payée pendant les cinq premières années : **`r round(100 * part_5_ans, 1)` %**.
+
+**c.**
+
+```{r b3-graphique}
+pret |>
+  pivot_longer(c(interets, capital_rembourse),
+               names_to = "composante", values_to = "montant") |>
+  mutate(composante = recode(composante, interets = "Intérêts",
+                             capital_rembourse = "Capital remboursé")) |>
+  ggplot(aes(mois, montant, colour = composante)) +
+  geom_line(linewidth = 1) +
+  labs(x = "Mois", y = "Montant (€)", colour = NULL,
+       title = "Prêt de 200 000 € à 3,5 % sur 20 ans")
+```
+
+**d.**
+
+```{r b3-durees}
+c(10, 15, 20, 25) |>
+  map(\(a) {
+    p <- amortissement(200000, 0.035, a)
+    tibble(annees = a, mensualite = p$mensualite[1], cout_interets = sum(p$interets))
+  }) |>
+  list_rbind() |>
+  mutate(across(c(mensualite, cout_interets), \(v) round(v, 2)))
+```
+
+Plus la durée est longue, plus la mensualité est faible, mais plus le coût total des intérêts est élevé : allonger la durée de 10 à 25 ans fait presque tripler les intérêts payés.
+
+## B4. Une fonction de résumé pour dplyr
+
+```{r b4}
+resume_par <- function(df, groupe, variable) {
+  if (!is.data.frame(df)) stop("`df` doit être un data frame.", call. = FALSE)
+  df |>
+    summarise(
+      effectif = n(),
+      n_na     = sum(is.na({{ variable }})),
+      moyenne  = mean({{ variable }}, na.rm = TRUE),
+      mediane  = median({{ variable }}, na.rm = TRUE),
+      minimum  = min({{ variable }}, na.rm = TRUE),
+      maximum  = max({{ variable }}, na.rm = TRUE),
+      .by = {{ groupe }}
+    ) |>
+    arrange(desc(moyenne))
+}
+
+r_air <- resume_par(airquality, Month, Ozone)
+r_mpg <- resume_par(mpg, class, cty)
+
+stopifnot(
+  nrow(r_air) == 5, sum(r_air$effectif) == nrow(airquality),               # cas courant
+  sum(r_air$n_na) == sum(is.na(airquality$Ozone)),
+  !is.unsorted(rev(r_air$moyenne)),                                         # tri décroissant
+  nrow(r_mpg) == 7, all(r_mpg$n_na == 0),
+  all.equal(r_mpg$moyenne[r_mpg$class == "suv"], mean(mpg$cty[mpg$class == "suv"])),
+  inherits(try(resume_par(airquality, Month, Inconnue), silent = TRUE), "try-error"),
+  inherits(try(resume_par(1:3, a, b), silent = TRUE), "try-error")
+)
+r_air
+r_mpg
+```
+
+L'ozone est le plus élevé en juillet et en août ; pour la consommation en ville, ce sont les `r r_mpg$class[1]` qui consomment le moins (moyenne de `r round(r_mpg$moyenne[1], 1)` miles par gallon) et les `r r_mpg$class[nrow(r_mpg)]` le plus.
+
+## B5. Lire des montants saisis à la main
+
+```{r b5}
+lire_montant <- function(texte) {
+  texte <- as.character(texte)
+  propre <- texte |>
+    str_remove_all("[\\s\\u00a0\\u202f€]") |>   # espaces (dont insécables) et symbole €
+    str_replace(",", ".")                        # virgule décimale -> point
+  valeurs <- suppressWarnings(as.numeric(propre))
+
+  fautives <- is.na(valeurs) & !is.na(texte)     # illisibles, mais pas déjà manquantes
+  if (any(fautives)) {
+    warning("Valeur(s) illisible(s) remplacée(s) par NA : ",
+            paste0("\"", texte[fautives], "\"", collapse = ", "), call. = FALSE)
+  }
+  valeurs
+}
+
+stopifnot(
+  all.equal(lire_montant(c("1\u00a0234,56\u00a0€", "12,5", " 7 ", "-15,00")),
+            c(1234.56, 12.5, 7, -15)),                                          # cas courants
+  all.equal(lire_montant("1 234,56 €"), 1234.56),
+  identical(lire_montant(NA_character_), NA_real_),                             # NA reste NA
+  identical(tryCatch(lire_montant(NA), warning = \(w) "avertissement"), NA_real_),
+  length(lire_montant(character(0))) == 0,                                      # cas limite
+  grepl("N/A", tryCatch(lire_montant(c("12", "N/A", "3,2,1")), warning = conditionMessage)),
+  grepl("3,2,1", tryCatch(lire_montant(c("12", "N/A", "3,2,1")), warning = conditionMessage))
+)
+
+# Un seul avertissement, qui cite les valeurs fautives
+saisies <- c("1\u00a0234,56\u00a0€", "12,5", " 7 ", "N/A", "3,2,1", "-15,00", NA)
+lire_montant(saisies)
+```
+
+# Partie C : Itérer avec apply et purrr
+
+## C1. Douze fichiers… et deux problèmes
+
+**a.**
+
+```{r c1a}
+fichiers <- list.files("data/ventes", pattern = "\\.csv$", full.names = TRUE)
+fichiers
+premier <- read_csv(fichiers[1])
+glimpse(premier)
+```
+
+Le premier fichier (janvier) contient `r nrow(premier)` lignes et 4 colonnes : `date` (type `Date`), `magasin` (texte), `tickets` et `chiffre_affaires` (numériques). Il y a une ligne par jour d'ouverture et par magasin (pas de ventes le dimanche).
+
+**b.**
+
+```{r c1b}
+donnees <- map(fichiers, read_csv)
+dimensions <- tibble(fichier  = basename(fichiers),
+                     lignes   = map_int(donnees, nrow),
+                     colonnes = map_int(donnees, ncol))
+dimensions
+```
+
+```{r c1b-lignes}
+suspects <- dimensions$fichier[dimensions$colonnes != 4]
+map(fichiers[dimensions$colonnes != 4], readLines, n = 3) |> set_names(suspects)
+```
+
+**Explication.** Les fichiers `r paste0("**", suspects, "**", collapse = " et ")` n'ont pas 4 colonnes. Février est séparé par des **points-virgules** (avec virgule décimale, format « français ») : `read_csv()` ne trouve aucune virgule et lit tout dans une seule colonne de texte. Août ne contient pas de données du tout : c'est un message d'erreur de l'extraction (« connexion interrompue, code 504 ») enregistré dans le fichier. Aucune erreur n'apparaît, car `read_csv()` lit tout ce qu'on lui donne ; si on empilait ensuite ces tableaux (`bind_rows()`), on introduirait **silencieusement** des colonnes parasites et des `NA` (ou on perdrait un mois entier) et tous les calculs suivants seraient faux.
+
+## C2. Une fonction de lecture robuste
+
+**a.**
+
+```{r c2a}
+lire_ventes <- function(fichier) {
+  attendues <- c("date", "magasin", "tickets", "chiffre_affaires")
+  entete <- readLines(fichier, n = 1, warn = FALSE)
+  lecteur <- if (str_detect(entete, ";")) read_csv2 else read_csv
+  separateur <- if (str_detect(entete, ";")) ";" else ","
+
+  colonnes <- str_split_1(entete, separateur)
+  if (!identical(colonnes, attendues)) {
+    stop(sprintf("Fichier « %s » : colonnes inattendues (« %s » au lieu de « %s »).",
+                 basename(fichier), str_trunc(entete, 60), paste(attendues, collapse = ", ")),
+         call. = FALSE)
+  }
+
+  lecteur(fichier, col_types = cols(date = col_date("%Y-%m-%d"),
+                                    magasin = col_character(),
+                                    tickets = col_integer(),
+                                    chiffre_affaires = col_double()))
+}
+
+# Tests
+mauvais <- tempfile(fileext = ".csv")
+writeLines(c("jour,boutique,n", "2025-01-01,Brest,3"), mauvais)
+stopifnot(
+  # cas courant (virgules)
+  identical(names(lire_ventes(fichiers[1])), c("date", "magasin", "tickets", "chiffre_affaires")),
+  inherits(lire_ventes(fichiers[1])$date, "Date"),
+  # cas limite : format français (point-virgule, virgule décimale)
+  is.numeric(lire_ventes(fichiers[2])$chiffre_affaires), !anyNA(lire_ventes(fichiers[2])),
+  nrow(lire_ventes(fichiers[2])) == nrow(read_csv2(fichiers[2], show_col_types = FALSE)),
+  # erreurs : fichier d'extraction cassé et mauvaises colonnes ; le message cite le fichier
+  grepl("ventes_2025_08.csv", tryCatch(lire_ventes(fichiers[8]), error = conditionMessage), fixed = TRUE),
+  grepl(basename(mauvais), tryCatch(lire_ventes(mauvais), error = conditionMessage), fixed = TRUE)
+)
+lire_ventes(fichiers[2])
+```
+
+**b.**
+
+```{r c2b}
+resultats <- map(fichiers, safely(lire_ventes)) |> set_names(basename(fichiers))
+
+echecs <- resultats |>
+  keep(\(r) !is.null(r$error)) |>
+  map_chr(\(r) conditionMessage(r$error))
+echecs
+```
+
+**c.**
+
+```{r c2c}
+ventes <- resultats |>
+  map("result") |>
+  compact() |>
+  list_rbind() |>
+  mutate(mois = month(date, label = TRUE, abbr = FALSE),
+         jour = wday(date, label = TRUE, abbr = FALSE, week_start = 1))
+glimpse(ventes)
+
+doublons  <- ventes |> count(date, magasin) |> filter(n > 1)
+manquants <- sum(is.na(ventes))
+stopifnot(nrow(doublons) == 0, manquants == 0)
+```
+
+Le tableau `ventes` contient **`r nrow(ventes)` lignes** (3 magasins, un enregistrement par jour d'ouverture et par magasin sur 11 mois, août étant manquant). Aucun doublon (même date et même magasin) et aucune valeur manquante (`r manquants`).
+
+## C3. Chiffre d'affaires mensuel
+
+**a.**
+
+```{r c3a}
+ca_mensuel <- ventes |>
+  summarise(ca = sum(chiffre_affaires), .by = c(mois, magasin))
+
+ca_mensuel |>
+  mutate(ca = round(ca / 1000)) |>
+  pivot_wider(names_from = magasin, values_from = ca) |>
+  arrange(mois)
+```
+
+(Chiffre d'affaires en milliers d'euros.)
+
+**b.**
+
+```{r c3b}
+meilleurs <- ca_mensuel |> slice_max(ca, n = 1, by = magasin) |>
+  mutate(ca = round(ca / 1000))
+meilleurs
+
+samedi_record <- ventes |>
+  filter(wday(date, week_start = 1) == 6) |>
+  summarise(ca = sum(chiffre_affaires), .by = date) |>
+  slice_max(ca, n = 1)
+samedi_record
+```
+
+Le meilleur mois de chaque magasin : `r paste0(meilleurs$magasin, " (", meilleurs$mois, ")", collapse = ", ")`. Le samedi le plus rentable de l'année, tous magasins confondus, est le **`r format(samedi_record$date, "%d %B %Y")`**, avec `r format(round(samedi_record$ca), big.mark = " ")` €.
+
+**c.**
+
+```{r c3c}
+m_nantes_janv <- ca_mensuel |> filter(magasin == "Nantes", mois == "janvier") |> pull(ca) / 1000
+m_nantes_dec  <- ca_mensuel |> filter(magasin == "Nantes", mois == "décembre") |> pull(ca) / 1000
+ca_mensuel |>
+  complete(mois, magasin) |>      # ajoute août (NA) pour que la courbe s'interrompe
+  ggplot(aes(mois, ca / 1000, colour = magasin, group = magasin)) +
+  geom_line(linewidth = 1) + geom_point(na.rm = TRUE) +
+  scale_x_discrete(guide = guide_axis(angle = 45)) +
+  labs(x = NULL, y = "Chiffre d'affaires (k€)", colour = NULL,
+       title = "Chiffre d'affaires mensuel par magasin")
+```
+
+**Ce que l'on voit.** Les trois magasins ne suivent pas la même trajectoire : **Nantes** progresse fortement toute l'année (de `r round(m_nantes_janv)` k€ en janvier à `r round(m_nantes_dec)` k€ en décembre), **Rennes** reste à peu près stable puis décolle en décembre, tandis que **Brest** s'érode lentement (sauf un rebond en décembre). Février est plus bas partout (mois plus court), et décembre est le pic de l'année pour Nantes et Rennes. La courbe est **interrompue en août** : le mois est manquant (échec d'extraction), et non à zéro ; il ne faut pas relier artificiellement juillet à septembre ni interpréter ce trou comme une fermeture.
+
+## C4. Une tendance par magasin
+
+**a.**
+
+```{r c4a}
+ventes <- ventes |>
+  mutate(t = as.numeric(date - ymd("2025-01-01")),
+         samedi = wday(date, week_start = 1) == 6)
+
+modeles <- ventes |>
+  nest(.by = magasin) |>
+  mutate(modele      = map(data, \(d) lm(log(chiffre_affaires) ~ t + samedi, data = d)),
+         beta_t      = map_dbl(modele, \(m) coef(m)[["t"]]),
+         beta_samedi = map_dbl(modele, \(m) coef(m)[["samediTRUE"]]))
+modeles |> select(magasin, beta_t, beta_samedi)
+```
+
+**b.**
+
+```{r c4b}
+modeles <- modeles |>
+  mutate(evolution_annuelle_pct = 100 * (exp(365 * beta_t) - 1),
+         effet_samedi_pct       = 100 * (exp(beta_samedi) - 1))
+modeles |> select(magasin, evolution_annuelle_pct, effet_samedi_pct) |>
+  mutate(across(where(is.numeric), \(v) round(v, 1)))
+```
+
+Sur le modèle brut, Brest recule de `r round(-modeles$evolution_annuelle_pct[modeles$magasin == "Brest"], 1)` % sur l'année, Rennes gagne `r round(modeles$evolution_annuelle_pct[modeles$magasin == "Rennes"], 1)` % et Nantes `r round(modeles$evolution_annuelle_pct[modeles$magasin == "Nantes"], 1)` %. L'effet du samedi est très proche pour les trois magasins : un samedi rapporte environ **`r round(min(modeles$effet_samedi_pct))` à `r round(max(modeles$effet_samedi_pct))` % de plus** qu'un autre jour.
+
+**c.**
+
+Ces évolutions sont faussées par un **effet saisonnier commun** aux trois magasins : l'activité de tout le réseau augmente en fin d'année (le pic de décembre, avec les fêtes, fait monter le chiffre d'affaires du réseau d'environ 40 % par rapport à novembre). Comme les données ne couvrent qu'une seule année, la pente en `t` mélange la tendance propre à chaque magasin avec cette saisonnalité commune, qui tire les trois tendances vers le haut. En divisant par la moyenne des trois magasins du jour, on enlève cet effet commun (et la variation due au jour de la semaine, aussi commune) :
+
+```{r c4c}
+relatif <- ventes |>
+  mutate(relatif = chiffre_affaires / mean(chiffre_affaires), .by = date)
+
+modeles_rel <- relatif |>
+  nest(.by = magasin) |>
+  mutate(modele = map(data, \(d) lm(log(relatif) ~ t, data = d)),
+         beta_t = map_dbl(modele, \(m) coef(m)[["t"]]),
+         evolution_annuelle_pct = 100 * (exp(365 * beta_t) - 1))
+modeles_rel |> select(magasin, evolution_annuelle_pct) |>
+  mutate(evolution_annuelle_pct = round(evolution_annuelle_pct, 1))
+```
+
+**Réponse.** Par rapport au réseau, **Nantes progresse** (`r round(modeles_rel$evolution_annuelle_pct[modeles_rel$magasin == "Nantes"], 1)` % sur l'année) alors que **Brest recule nettement** (`r round(modeles_rel$evolution_annuelle_pct[modeles_rel$magasin == "Brest"], 1)` %) ; **Rennes**, dont la hausse apparente de `r round(modeles$evolution_annuelle_pct[modeles$magasin == "Rennes"])` % venait surtout de la saisonnalité, recule légèrement (`r round(modeles_rel$evolution_annuelle_pct[modeles_rel$magasin == "Rennes"], 1)` %).
+
+## C5. Plusieurs indicateurs, plusieurs colonnes
+
+**a.**
+
+```{r c5a}
+ventes <- ventes |> mutate(panier = chiffre_affaires / tickets)
+summary(ventes$panier)
+```
+
+**b.**
+
+```{r c5b}
+cv <- function(x, na.rm = FALSE) {
+  if (!is.numeric(x)) stop("`x` doit être numérique.", call. = FALSE)
+  sd(x, na.rm = na.rm) / mean(x, na.rm = na.rm)
+}
+
+stopifnot(
+  all.equal(cv(c(10, 20, 30)), 10 / 20),                    # cas courant
+  all.equal(cv(c(1, NA, 3), na.rm = TRUE), sd(c(1, 3)) / 2),
+  is.na(cv(c(1, NA, 3))),                                   # NA sans na.rm
+  all.equal(cv(c(5, 5, 5)), 0),                             # cas limite : sans dispersion
+  inherits(try(cv("a"), silent = TRUE), "try-error")
+)
+
+indicateurs <- ventes |>
+  summarise(across(c(tickets, chiffre_affaires, panier),
+                   list(moy = mean, sd = sd, cv = cv),
+                   .names = "{.col}_{.fn}"),
+            .by = magasin) |>
+  mutate(across(where(is.numeric), \(v) round(v, 2)))
+indicateurs
+```
+
+**c.**
+
+```{r c5c}
+indicateurs |> select(magasin, panier_moy, ends_with("_cv"))
+```
+
+Le panier moyen est quasiment le même dans les trois magasins (autour de 38 € : **`r indicateurs$magasin[which.max(indicateurs$panier_moy)]`** arrive en tête, `r max(indicateurs$panier_moy)` €, mais l'écart avec les autres, de l'ordre de 0,05 €, est négligeable). D'un jour à l'autre, c'est le **nombre de tickets** qui varie le plus (coefficient de variation de 0,22 à 0,33), un peu plus que le chiffre d'affaires, tandis que le **panier moyen** est beaucoup plus stable (coefficient de variation de 0,06 à 0,10) : la clientèle dépense à peu près la même somme, ce sont les volumes qui changent. Le coefficient de variation, sans unité, permet de comparer des indicateurs d'échelles différentes, ce que l'écart-type ne permet pas.
+
+## C6. La famille apply sur une matrice
+
+**a.**
+
+```{r c6a}
+m_ca <- ca_mensuel |>
+  arrange(mois) |>
+  mutate(ca = ca / 1000) |>
+  pivot_wider(names_from = mois, values_from = ca) |>
+  column_to_rownames("magasin") |>
+  as.matrix()
+round(m_ca, 1)
+dim(m_ca)
+```
+
+**b.**
+
+```{r c6b}
+tibble(magasin = rownames(m_ca),
+       meilleur_mois = apply(m_ca, 1, \(l) names(which.max(l))),
+       pire_mois     = apply(m_ca, 1, \(l) names(which.min(l))))
+```
+
+**c.**
+
+```{r c6c}
+part_apply <- apply(m_ca, 2, \(colonne) 100 * colonne / sum(colonne))
+dim(part_apply)
+round(part_apply, 1)
+
+part_sweep <- 100 * sweep(m_ca, 2, colSums(m_ca), "/")
+stopifnot(isTRUE(all.equal(part_apply, part_sweep)),
+          all.equal(unname(colSums(part_apply)), rep(100, ncol(m_ca))))
+```
+
+La part de chaque magasin dans un mois se calcule **colonne par colonne** (`MARGIN = 2`) : chaque appel renvoie alors un vecteur de 3 valeurs (un par magasin) et `apply()` les range en colonnes, d'où une matrice de même forme que `m_ca` (3 × `r ncol(m_ca)`) : ici, la forme est bien celle attendue et `t()` n'est **pas** nécessaire. C'est avec `MARGIN = 1` (par exemple la répartition d'un magasin sur les mois) que `apply()` renverrait une matrice transposée (mois en lignes), qu'il faudrait corriger par `t()` :
+
+```{r c6c-t}
+repartition_annee <- t(apply(m_ca, 1, \(ligne) 100 * ligne / sum(ligne)))
+stopifnot(identical(dim(repartition_annee), dim(m_ca)))
+```
+
+`sweep()` donne exactement le même résultat (vérifié par `all.equal()`), sans condition sur l'orientation.
+
+# Partie D : Simulations
+
+## D1. Le problème de Monty Hall
+
+**a.**
+
+```{r d1a}
+partie <- function(changer, n_portes = 3) {
+  if (!is.logical(changer) || length(changer) != 1 || is.na(changer))
+    stop("`changer` doit valoir TRUE ou FALSE.", call. = FALSE)
+  if (!is.numeric(n_portes) || length(n_portes) != 1 || n_portes < 3 || n_portes != floor(n_portes))
+    stop("`n_portes` doit être un entier >= 3.", call. = FALSE)
+
+  portes  <- seq_len(n_portes)
+  voiture <- sample.int(n_portes, 1)
+  choix   <- sample.int(n_portes, 1)
+
+  # L'animateur ouvre une porte (chèvre) différente du choix du joueur.
+  # Piège : sample(v, 1) avec un v de longueur 1 tire dans 1:v ! On passe par les indices.
+  possibles <- setdiff(portes, c(choix, voiture))
+  ouverte   <- possibles[sample.int(length(possibles), 1)]
+
+  if (changer) {
+    restantes <- setdiff(portes, c(choix, ouverte))
+    choix <- restantes[sample.int(length(restantes), 1)]
+  }
+  choix == voiture
+}
+
+set.seed(88)
+stopifnot(
+  is.logical(partie(TRUE)), length(partie(FALSE)) == 1,                    # cas courant
+  all(map_lgl(1:2000, \(i) is.logical(partie(TRUE, 3)))),                  # le piège de sample()
+  all(map_lgl(1:2000, \(i) is.logical(partie(TRUE, 8)))),
+  abs(mean(map_lgl(1:5000, \(i) partie(TRUE))) - 2/3) < 0.05,              # convergence
+  abs(mean(map_lgl(1:5000, \(i) partie(FALSE))) - 1/3) < 0.05,
+  inherits(try(partie(TRUE, 2), silent = TRUE), "try-error"),              # erreurs
+  inherits(try(partie("oui"), silent = TRUE), "try-error")
+)
+```
+
+Le piège : quand le joueur a choisi la porte de la voiture, l'animateur a deux portes possibles ; sinon une seule, par exemple `possibles = 2`, et `sample(2, 1)` tirerait au hasard parmi `1:2` au lieu de renvoyer la porte 2. On tire donc un **indice** (`sample.int(length(possibles), 1)`) puis on indexe.
+
+**b.**
+
+```{r d1b}
+set.seed(88)
+gain_changer <- mean(map_lgl(1:10000, \(i) partie(TRUE)))
+gain_garder  <- mean(map_lgl(1:10000, \(i) partie(FALSE)))
+c(changer = gain_changer, garder = gain_garder)
+```
+
+**Réponse.** Il faut **changer de porte** : on gagne environ `r round(100 * gain_changer, 1)` % du temps en changeant, contre `r round(100 * gain_garder, 1)` % en gardant son choix initial (théorie : 2/3 et 1/3). La porte initiale a 1 chance sur 3 d'être la bonne et l'animateur ne change pas cette probabilité ; les 2/3 restants se concentrent sur l'autre porte fermée.
+
+**c.**
+
+```{r d1c}
+set.seed(88)
+monty <- expand_grid(n_portes = 3:8, changer = c(FALSE, TRUE)) |>
+  mutate(estimee   = map2_dbl(n_portes, changer, \(n, ch) mean(map_lgl(1:10000, \(i) partie(ch, n)))),
+         theorique = if_else(changer, (n_portes - 1) / (n_portes * (n_portes - 2)), 1 / n_portes),
+         ecart     = estimee - theorique) |>
+  mutate(across(c(estimee, theorique, ecart), \(v) round(v, 3)))
+monty
+```
+
+Les probabilités estimées sont proches des valeurs théoriques (écarts de l'ordre de 0,01, cohérents avec l'erreur d'échantillonnage pour 10 000 parties) ; l'avantage de changer croît avec le nombre de portes.
+
+## D2. La ruine du joueur
+
+**a.**
+
+```{r d2a}
+ruine <- function(depart, objectif, p) {
+  if (!is.numeric(depart) || !is.numeric(objectif) || !is.numeric(p) ||
+      length(depart) != 1 || length(objectif) != 1 || length(p) != 1)
+    stop("`depart`, `objectif` et `p` doivent être des nombres uniques.", call. = FALSE)
+  if (depart < 0 || depart > objectif || depart != floor(depart) || objectif != floor(objectif))
+    stop("Il faut 0 <= depart <= objectif, avec des entiers.", call. = FALSE)
+  if (is.na(p) || p < 0 || p > 1) stop("`p` doit être une probabilité.", call. = FALSE)
+
+  argent <- depart
+  duree  <- 0
+  while (argent > 0 && argent < objectif) {
+    argent <- argent + if (runif(1) < p) 1 else -1
+    duree  <- duree + 1
+  }
+  c(gagne = as.numeric(argent >= objectif), duree = duree)
+}
+
+set.seed(37)
+stopifnot(
+  identical(names(ruine(10, 20, 0.5)), c("gagne", "duree")),                 # cas courant
+  ruine(10, 20, 0.5)[["gagne"]] %in% 0:1,
+  identical(ruine(0, 10, 0.5), c(gagne = 0, duree = 0)),                     # cas limites
+  identical(ruine(10, 10, 0.5), c(gagne = 1, duree = 0)),
+  identical(ruine(3, 10, 1), c(gagne = 1, duree = 7)),                       # p = 1 : déterministe
+  identical(ruine(3, 10, 0), c(gagne = 0, duree = 3)),                       # p = 0 : déterministe
+  inherits(try(ruine(30, 20, 0.5), silent = TRUE), "try-error")              # erreur
+)
+```
+
+**b.**
+
+```{r d2b}
+set.seed(37)
+seances_equitable <- replicate(5000, ruine(10, 20, 0.5))
+seances_roulette  <- replicate(5000, ruine(10, 20, 18/37))
+
+simule <- tibble(cas = c("p = 0,5", "p = 18/37"),
+                 proba_objectif = c(mean(seances_equitable["gagne", ]), mean(seances_roulette["gagne", ])),
+                 duree_moyenne  = c(mean(seances_equitable["duree", ]), mean(seances_roulette["duree", ])))
+simule
+```
+
+**c.**
+
+```{r d2c}
+theorie_ruine <- function(depart, objectif, p) {
+  if (depart < 0 || depart > objectif || p <= 0 || p >= 1)
+    stop("Il faut 0 <= depart <= objectif et 0 < p < 1.", call. = FALSE)
+  if (isTRUE(all.equal(p, 0.5))) {
+    return(c(proba = depart / objectif, duree = depart * (objectif - depart)))
+  }
+  r <- (1 - p) / p
+  proba <- (1 - r^depart) / (1 - r^objectif)
+  # durée moyenne (formule classique, non demandée dans l'énoncé)
+  duree <- depart / (1 - 2 * p) - objectif / (1 - 2 * p) * proba
+  c(proba = proba, duree = duree)
+}
+
+stopifnot(
+  all.equal(theorie_ruine(10, 20, 0.5), c(proba = 0.5, duree = 100)),         # cas courant
+  theorie_ruine(10, 20, 18/37)[["proba"]] < 0.5,                              # jeu défavorable
+  all.equal(theorie_ruine(0, 20, 18/37)[["proba"]], 0),                       # cas limites
+  all.equal(theorie_ruine(20, 20, 18/37)[["proba"]], 1),
+  inherits(try(theorie_ruine(10, 20, 1.2), silent = TRUE), "try-error")       # erreur
+)
+
+comparaison <- simule |>
+  mutate(theorie_proba = c(theorie_ruine(10, 20, 0.5)[["proba"]], theorie_ruine(10, 20, 18/37)[["proba"]]),
+         theorie_duree = c(theorie_ruine(10, 20, 0.5)[["duree"]], theorie_ruine(10, 20, 18/37)[["duree"]])) |>
+  mutate(across(where(is.numeric), \(v) round(v, 3)))
+comparaison
+```
+
+Les simulations sont en bon accord avec la théorie : pour un jeu équitable la probabilité de doubler sa mise est de 50 % ; à la roulette (p = 18/37) elle tombe à environ `r round(100 * theorie_ruine(10, 20, 18/37)[["proba"]], 1)` %, et la séance dure un peu moins longtemps.
+
+**d.**
+
+```{r d2d}
+tibble(depart = c(5, 10, 25, 50, 100)) |>
+  mutate(objectif = 2 * depart,
+         proba = map2_dbl(depart, objectif, \(a, N) theorie_ruine(a, N, 18/37)[["proba"]]),
+         proba_pct = round(100 * proba, 2))
+```
+
+**Conclusion.** Même pour un objectif modeste (doubler la mise), la probabilité de réussir **décroît très vite** quand on joue avec un capital plus grand (de ~`r round(100 * theorie_ruine(5, 10, 18/37)[["proba"]])` % pour 5 € à moins de 1 % pour 100 €) : plus la séance est longue, plus l'avantage de la banque (sur chaque euro misé, le joueur perd en moyenne 1/37 €, à cause du zéro) s'accumule. Un petit avantage par partie devient un avantage écrasant sur un grand nombre de parties : à la roulette, mieux vaut jouer peu de parties.
+
+## D3. Le bootstrap
+
+**a.**
+
+```{r d3a}
+bootstrap <- function(x, stat, B = 2000) {
+  if (!is.numeric(x) || length(x) < 2) stop("`x` doit être un vecteur numérique d'au moins 2 valeurs.", call. = FALSE)
+  if (anyNA(x)) stop("`x` ne doit pas contenir de valeurs manquantes.", call. = FALSE)
+  if (!is.function(stat)) stop("`stat` doit être une fonction.", call. = FALSE)
+  if (!is.numeric(B) || length(B) != 1 || B < 1) stop("`B` doit être un entier positif.", call. = FALSE)
+
+  # x[sample.int(...)] et non sample(x, ...) : mêmes précautions qu'en D1
+  map_dbl(seq_len(B), \(b) stat(x[sample.int(length(x), replace = TRUE)]))
+}
+
+set.seed(2026)
+stopifnot(
+  length(bootstrap(c(1, 2, 3, 10), mean, B = 100)) == 100,                      # cas courant
+  all(bootstrap(rep(4, 10), median, B = 50) == 4),                              # cas limite : données constantes
+  all(bootstrap(c(1, 5), mean, B = 200) %in% c(1, 3, 5)),                       # 2 valeurs seulement
+  inherits(try(bootstrap(c(1, 2, 3), "mean"), silent = TRUE), "try-error"),     # erreurs
+  inherits(try(bootstrap(c(1, NA, 3), mean), silent = TRUE), "try-error"),
+  inherits(try(bootstrap(5, mean), silent = TRUE), "try-error")
+)
+```
+
+**b.**
+
+```{r d3b}
+paniers_brest <- ventes |> filter(magasin == "Brest") |> pull(panier)
+
+set.seed(2026)
+boot_mediane <- bootstrap(paniers_brest, median)
+ic_mediane   <- quantile(boot_mediane, c(0.025, 0.975))
+estimation   <- median(paniers_brest)
+ic_mediane
+
+ggplot(tibble(mediane = boot_mediane), aes(mediane)) +
+  geom_histogram(bins = 40, fill = "grey70", colour = "white") +
+  geom_vline(xintercept = estimation, colour = "firebrick", linewidth = 1) +
+  geom_vline(xintercept = ic_mediane, colour = "steelblue", linetype = "dashed", linewidth = 1) +
+  labs(x = "Médiane bootstrap du panier moyen (€)", y = "Effectif",
+       title = "Bootstrap de la médiane du panier moyen de Brest",
+       subtitle = "Rouge : estimation ; bleu : bornes de l'IC à 95 %")
+```
+
+**Réponse.** La médiane du panier moyen quotidien de Brest est estimée à **`r round(estimation, 2)` €**, avec un intervalle de confiance à 95 % par bootstrap de **[`r round(ic_mediane[[1]], 2)` ; `r round(ic_mediane[[2]], 2)`] €**.
+
+**c.**
+
+```{r d3c}
+set.seed(2026)
+boot_moyenne <- bootstrap(paniers_brest, mean)
+ic_moyenne   <- quantile(boot_moyenne, c(0.025, 0.975))
+ic_t         <- t.test(paniers_brest)$conf.int
+
+tibble(methode = c("Bootstrap (percentiles)", "t.test()"),
+       borne_basse = c(ic_moyenne[[1]], ic_t[1]),
+       borne_haute = c(ic_moyenne[[2]], ic_t[2])) |>
+  mutate(across(where(is.numeric), \(v) round(v, 3)))
+```
+
+Les deux intervalles pour la moyenne sont quasiment identiques : avec un échantillon de `r length(paniers_brest)` valeurs, la moyenne est approximativement normale (théorème central limite), donc l'hypothèse du test de Student est raisonnable ; le bootstrap y parvient sans aucune hypothèse, et il reste applicable à la médiane, pour laquelle `t.test()` ne dit rien.
+
+**d.**
+
+```{r d3d, error = TRUE}
+set.seed(2026)
+q90 <- bootstrap(paniers_brest, \(v) quantile(v, 0.9))
+c(longueur = length(q90), estimation = quantile(paniers_brest, 0.9)[[1]],
+  ic_bas = quantile(q90, 0.025)[[1]], ic_haut = quantile(q90, 0.975)[[1]])
+
+bootstrap(paniers_brest, range)
+```
+
+La statistique `\(v) quantile(v, 0.9)` est acceptée : elle renvoie **un seul nombre** (même s'il est nommé « 90% »). `range` renvoie **deux** valeurs (min et max) : `map_dbl()` s'arrête avec une erreur (« Result must be length 1 »). C'est une bonne chose : un bootstrap de $B$ statistiques suppose une valeur par réplication, et `map_dbl()` garantit le type et la longueur du résultat. Avec `sapply()`, on obtiendrait sans avertissement une matrice 2 × $B$, et le calcul ultérieur des quantiles mélangerait minimums et maximums, ce qui donnerait un résultat faux sans signaler la moindre erreur. Pour un intervalle sur le minimum et le maximum, il faut faire deux bootstraps séparés.
